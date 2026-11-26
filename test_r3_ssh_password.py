@@ -20,7 +20,7 @@ except ImportError:
 @unittest.skipUnless(paramiko is not None, "Optional password client is not installed")
 class PasswordTransportTests(unittest.TestCase):
     @contextmanager
-    def server(self):
+    def server(self, *, expect_refusal=False):
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
 
@@ -66,6 +66,9 @@ class PasswordTransportTests(unittest.TestCase):
                             channel.sendall(data[::-1])
                             channel.sendall_stderr(b"fixture stderr\n")
                             channel.send_exit_status(0)
+                except (ConnectionResetError, EOFError) as error:
+                    if not expect_refusal or "login" in seen:
+                        errors.append(error)
                 except Exception as error:
                     errors.append(error)
 
@@ -90,7 +93,7 @@ class PasswordTransportTests(unittest.TestCase):
         self.assertEqual(seen["command"], b"python3 verify.py 'two words'")
 
     def test_host_mismatch_refuses_to_send_password(self):
-        with self.server() as (port, pin, seen):
+        with self.server(expect_refusal=True) as (port, pin, seen):
             wrong = pin[:-1] + ("A" if pin[-1] != "A" else "B")
             with self.assertRaisesRegex(ValueError, "Pi host key"):
                 run_ssh("operator@127.0.0.1", wrong, None, "test-pass",
@@ -98,7 +101,7 @@ class PasswordTransportTests(unittest.TestCase):
         self.assertNotIn("login", seen)
 
     def test_first_contact_confirmation_is_required_before_login(self):
-        with self.server() as (port, pin, seen):
+        with self.server(expect_refusal=True) as (port, pin, seen):
             def decline(fingerprint):
                 self.assertEqual(fingerprint, pin)
                 return False
