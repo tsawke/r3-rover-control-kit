@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="r3-token" content="__CONSOLE_TOKEN__">
+  <title>R3 Control Console</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="frame topline">
+      <div class="identity">
+        <div class="mark" aria-hidden="true">R3</div>
+        <div><h1 data-i18n="heading">Control Console</h1><div class="hardware" data-i18n="hardware">R3 Mecanum chassis</div></div>
+      </div>
+      <div class="topcontrols">
+        <div class="segments" aria-label="Control mode" data-i18n="mode" data-i18n-attr="aria-label">
+          <button id="sim" type="button" aria-pressed="true" data-i18n="simulation">Simulation</button>
+          <button id="live" type="button" aria-pressed="false" data-i18n="live" disabled>Live</button>
+        </div>
+        <button type="button" id="language" class="button subtle language" title="Switch to Chinese" aria-label="Switch to Chinese" lang="zh-CN">中文</button>
+        <button type="button" id="stop" class="button danger" disabled><svg aria-hidden="true"><use href="/icons.svg#square"></use></svg><span data-i18n="stop">Stop</span></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="frame workspace">
+    <section class="statusbar" aria-label="Connection status" data-i18n="connectionStatus" data-i18n-attr="aria-label">
+      <div class="status-main"><span class="dot" id="state-dot"></span><strong id="link-state" aria-live="polite">Connecting to the simulator</strong></div>
+      <div class="status-detail" id="link-detail">Local simulation</div>
+      <button id="reconnect" type="button" class="button subtle" hidden><svg aria-hidden="true"><use href="/icons.svg#refresh-cw"></use></svg><span data-i18n="reconnect">Restart simulation</span></button>
+    </section>
+    <div class="notice" id="notice" role="status" hidden></div>
+
+    <div class="workgrid">
+      <section class="map-section" aria-labelledby="map-heading">
+        <div class="section-title">
+          <h2 id="map-heading" data-i18n="map">Coordinate map</h2><span class="tag" id="pose-source">Simulated pose</span>
+        </div>
+        <div class="plot">
+          <canvas id="plot" aria-label="Coordinate map" data-i18n="map" data-i18n-attr="aria-label"></canvas>
+          <div class="plot-legend" aria-hidden="true"><span><i class="legend-pose"></i><b data-i18n="robot">Robot</b></span><span><i class="legend-target"></i><b data-i18n="target">Target</b></span></div>
+        </div>
+        <dl class="pose" aria-label="Current pose" data-i18n="pose" data-i18n-attr="aria-label">
+          <div><dt data-i18n="x">X coordinate</dt><dd><output id="pose-x">0.000</output><span>m</span></dd></div>
+          <div><dt data-i18n="y">Y coordinate</dt><dd><output id="pose-y">0.000</output><span>m</span></dd></div>
+          <div><dt data-i18n="headingAngle">Heading</dt><dd><output id="pose-yaw">0.0</output><span>°</span></dd></div>
+        </dl>
+      </section>
+
+      <section class="controls" aria-labelledby="control-heading">
+        <div class="section-title"><h2 id="control-heading" data-i18n="motion">Motion control</h2></div>
+        <p class="small limit-note" id="legacy-limits" data-i18n="legacyLimits" hidden>This session uses the default speed limits.</p>
+        <div class="arm" id="arm" hidden>
+          <h3 data-i18n="liveConnection">Live connection</h3>
+          <label class="ack"><input id="ack" type="checkbox"><span data-i18n="ack">Origin aligned; Mec selected; wheels still with Motor ON; I am beside the main power switch.</span></label>
+          <button id="connect" type="button" class="button secondary" disabled><svg aria-hidden="true"><use href="/icons.svg#radio"></use></svg><span data-i18n="connect">Connect to robot</span></button>
+          <p data-i18n="cutoff">If control is lost, cut main power.</p>
+        </div>
+
+        <section class="command-block jog" aria-labelledby="jog-heading">
+          <div class="command-title"><h3 id="jog-heading" data-i18n="hold">Hold to drive</h3><span class="small" data-i18n="bodyRelative">Robot-relative</span></div>
+          <div class="jog-pad" role="group" aria-labelledby="jog-heading">
+            <button type="button" class="button secondary" data-jog="ccw" disabled><svg aria-hidden="true"><use href="/icons.svg#rotate-ccw"></use></svg><span data-i18n="ccw">Turn left</span></button>
+            <button type="button" class="button secondary" data-jog="forward" disabled><svg aria-hidden="true"><use href="/icons.svg#arrow-up"></use></svg><span data-i18n="forward">Forward</span></button>
+            <button type="button" class="button secondary" data-jog="cw" disabled><svg class="mirror" aria-hidden="true"><use href="/icons.svg#rotate-ccw"></use></svg><span data-i18n="cw">Turn right</span></button>
+            <button type="button" class="button secondary" data-jog="left" disabled><svg class="point-left" aria-hidden="true"><use href="/icons.svg#arrow-up"></use></svg><span data-i18n="left">Slide left</span></button>
+            <button type="button" class="button secondary" data-jog="backward" disabled><svg class="point-down" aria-hidden="true"><use href="/icons.svg#arrow-up"></use></svg><span data-i18n="backward">Reverse</span></button>
+            <button type="button" class="button secondary" data-jog="right" disabled><svg class="point-right" aria-hidden="true"><use href="/icons.svg#arrow-up"></use></svg><span data-i18n="right">Slide right</span></button>
+          </div>
+          <p class="small" id="legacy-jog" data-i18n="legacyJog" hidden>Hold to drive is unavailable in this session.</p>
+        </section>
+
+        <form id="move-form" class="command-block">
+          <div class="command-title"><h3 data-i18n="move">Move</h3><button id="origin" type="button" class="button subtle" title="Set the target to (0, 0)" data-i18n="originTitle" data-i18n-attr="title"><svg aria-hidden="true"><use href="/icons.svg#locate-fixed"></use></svg><span data-i18n="origin">Origin</span></button></div>
+          <div class="coordinates">
+            <label for="target-x"><span data-i18n="targetX">Target X</span><span class="inputbox"><input id="target-x" type="number" inputmode="decimal" min="-100" max="100" step="any" value="0.20" required><b>m</b></span></label>
+            <label for="target-y"><span data-i18n="targetY">Target Y</span><span class="inputbox"><input id="target-y" type="number" inputmode="decimal" min="-100" max="100" step="any" value="0.10" required><b>m</b></span></label>
+          </div>
+          <div class="limit-row"><label for="move-speed" data-i18n="moveSpeed">Move speed limit</label><span class="inputbox"><input id="move-speed" type="number" inputmode="decimal" min="55" max="100" step="any" value="100" required disabled><b>mm/s</b></span></div>
+          <button id="move" type="submit" class="button primary full" disabled><svg aria-hidden="true"><use href="/icons.svg#navigation"></use></svg><span data-i18n="moveTo">Move to target</span></button>
+        </form>
+
+        <form id="turn-form" class="command-block turning">
+          <div class="command-title"><h3 data-i18n="turn">Rotate</h3><span class="small" data-i18n="headingRelative">Relative to heading</span></div>
+          <div class="coordinates">
+            <label for="degrees"><span data-i18n="angle">Angle</span><span class="inputbox"><input id="degrees" type="number" inputmode="decimal" min="-360" max="360" step="any" value="10" required><b>°</b></span></label>
+            <label for="angle-preset"><span data-i18n="presets">Angle presets</span><select id="angle-preset">
+              <option value="" data-i18n="selectAngle">Select angle</option>
+              <optgroup label="Counterclockwise" data-i18n="counterclockwise" data-i18n-attr="label"><option value="10">+10°</option><option value="30">+30°</option><option value="45">+45°</option><option value="90">+90°</option><option value="180">+180°</option></optgroup>
+              <optgroup label="Clockwise" data-i18n="clockwise" data-i18n-attr="label"><option value="-10">−10°</option><option value="-30">−30°</option><option value="-45">−45°</option><option value="-90">−90°</option><option value="-180">−180°</option></optgroup>
+            </select></label>
+          </div>
+          <div class="limit-row"><label for="turn-speed" data-i18n="turnSpeed">Turn speed limit</label><span class="inputbox"><input id="turn-speed" type="number" inputmode="decimal" min="8" max="13.18" step="any" value="13.18" required disabled><b>°/s</b></span></div>
+          <button id="turn" type="submit" class="button secondary full" disabled><svg aria-hidden="true"><use href="/icons.svg#rotate-ccw"></use></svg><span data-i18n="turnInPlace">Rotate in place</span></button>
+        </form>
+      </section>
+    </div>
+
+    <section class="history" aria-labelledby="history-heading">
+      <div class="section-title"><h2 id="history-heading" data-i18n="history">Command history</h2><span class="small" id="count">0 commands</span></div>
+      <p id="empty" class="empty" data-i18n="empty">No completed commands</p>
+      <table id="history-table" hidden>
+        <thead><tr><th scope="col" data-i18n="time">Time</th><th scope="col" data-i18n="command">Command</th><th scope="col" data-i18n="final">Final pose</th></tr></thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
