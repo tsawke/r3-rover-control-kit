@@ -3,6 +3,7 @@ control.local.tmp
 __pycache__/
 
 /.bench_deps/
+/.client_deps/
 /.pi3-media/
 /dist/
 /firmware_backups/

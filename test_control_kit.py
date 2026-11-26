@@ -22,7 +22,7 @@ class ControlKitTests(unittest.TestCase):
             identity = Path(temp) / "dedicated identity"
             identity.touch()
             adapter = {"device": "/dev/ttyACM0", "serial": "NEW-ROBOT-123"}
-            args = ["r3@r3-pi.local", str(identity), "192.168.1.4", "1", "1", "8770", "", ""]
+            args = ["r3@r3-pi.local", "key", str(identity), "192.168.1.4", "1", "1", "8770", "", ""]
             responses = [None, None, json.dumps([adapter]), None]
             with (patch.object(kit, "CONFIG", profile), patch.object(kit, "pi_payload", return_value=b"payload"),
                   patch.object(kit, "ssh", side_effect=responses) as ssh,
@@ -37,6 +37,26 @@ class ControlKitTests(unittest.TestCase):
             self.assertIn(adapter["serial"], kit.start_args(config))
             self.assertIn("192.168.1.4", kit.start_args(config))
             self.assertNotIn("--host", kit.start_args({}, simulation=True))
+
+    def test_password_setup_does_not_record_the_secret_or_require_a_key(self):
+        with TemporaryDirectory() as temp:
+            profile = Path(temp) / "profile.json"
+            pin, secret = "SHA256:" + "A" * 43, "fixture-demo-only"
+            args = ["admin@r3-pi.local", "", pin, "", "1", "1", "8770", "", ""]
+            responses = [None, json.dumps([{"device": "/dev/ttyACM0", "serial": "UART-1"}]), None]
+            with (patch.object(kit, "CONFIG", profile), patch.object(kit, "pi_payload", return_value=b"payload"),
+                  patch.object(kit, "ssh", side_effect=responses) as ssh,
+                  patch.object(kit, "ensure_password_client"), patch.object(kit, "prompt_password", return_value=secret),
+                  patch("builtins.input", side_effect=args), patch("builtins.print")):
+                kit.setup()
+            self.assertEqual(ssh.call_count, 3)
+            self.assertTrue(all(call.kwargs["password"] == secret for call in ssh.call_args_list))
+            self.assertNotIn(secret, profile.read_text(encoding="utf-8"))
+            config = kit.validate(kit.read_config(profile))
+            self.assertEqual(config["auth"], "password")
+            self.assertNotIn("identity", config)
+            self.assertIn(pin, kit.start_args(config))
+            self.assertNotIn(secret, kit.start_args(config))
 
     def test_kit_agent_takes_serial_option_without_changing_legacy_path(self):
         args = SimpleNamespace(simulate=False, host="r3@r3-pi.local", port="auto", yaw_sign=1,

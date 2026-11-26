@@ -13,6 +13,8 @@ import subprocess
 import sys
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
+from r3_ssh_password import CLIENT_DEPS, FINGERPRINT, paramiko_module, prompt_password, run_ssh
+
 
 ROOT = Path(__file__).resolve().parent
 CONFIG = ROOT / "control.local.json"
@@ -22,6 +24,7 @@ WHEEL_SHA256 = "c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0
 PI_FILES = ("r3_remote.py", "r3_live.py", "r3_control.py", "c30d_bench.py", "c30d_protocol.py")
 DEFAULT_PORT = 8770
 SERIAL = r"[A-Za-z0-9_.:-]{1,80}"
+PASSWORD_CLIENT = "paramiko==5.1.0"
 
 INSTALLER = """\
 from hashlib import sha256
@@ -58,9 +61,17 @@ def validate(config, *, deployed=True):
     host = config.get("host", "")
     if not isinstance(host, str) or not re.fullmatch(r"[a-zA-Z0-9_][a-zA-Z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.-]*", host):
         raise ValueError("Enter the Pi as username@hostname.local or username@IPv4-address.")
-    identity = config.get("identity")
-    if not isinstance(identity, str) or not identity or not Path(identity).expanduser().is_file():
-        raise ValueError("The local SSH private key is missing. Run Prepare-Key.cmd or choose an existing key.")
+    auth = config.get("auth", "key")
+    if auth == "key":
+        identity = config.get("identity")
+        if not isinstance(identity, str) or not identity or not Path(identity).expanduser().is_file():
+            raise ValueError("The local SSH private key is missing. Run Prepare-Key.cmd or choose an existing key.")
+    elif auth == "password":
+        fingerprint = config.get("host_fingerprint")
+        if (deployed or fingerprint) and not re.fullmatch(FINGERPRINT, fingerprint or ""):
+            raise ValueError("Enter the Pi's SHA256 SSH host fingerprint.")
+    else:
+        raise ValueError("Select password or key login.")
     if config.get("bind_address"):
         ipaddress.IPv4Address(config["bind_address"])
     for key in ("yaw_sign", "lateral_sign"):
@@ -96,7 +107,33 @@ def prepare_key():
     print("Keep the matching private key on this computer.")
 
 
-def ssh(config, remote, *, trust=False, data=None, capture=False):
+def ensure_password_client():
+    try:
+        paramiko_module()
+    except ImportError:
+        print("Installing the Windows password-login client from PyPI (one-time, internet required).", flush=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "--only-binary=:all:",
+                        "--target", str(CLIENT_DEPS), PASSWORD_CLIENT], check=True)
+        paramiko_module()
+
+
+def ssh(config, remote, *, trust=False, data=None, capture=False, password=None):
+    if config.get("auth") == "password":
+        def enroll(fingerprint):
+            print(f'First contact with {config["host"]}: {fingerprint}')
+            print("Compare it with ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the Pi.")
+            if input("Trust this Pi host key (yes/no)? ").strip().lower() != "yes":
+                return False
+            config["host_fingerprint"] = fingerprint
+            return True
+
+        output = io.BytesIO() if capture else sys.stdout.buffer
+        code = run_ssh(config["host"], config.get("host_fingerprint") or None, config.get("bind_address"),
+                       password, remote, io.BytesIO(data or b""), output, sys.stderr.buffer,
+                       enroll=enroll if trust else None, timeout=30)
+        if code != 0:
+            raise ValueError(f"Pi command exited with status {code}.")
+        return output.getvalue().decode("utf-8") if capture else None
     argv = [require_tool("ssh"), "-T", "-F", "none", "-o", "ConnectTimeout=8",
             "-o", "IdentitiesOnly=yes", "-o", "PreferredAuthentications=publickey",
             "-o", "HostKeyAlgorithms=ssh-ed25519",
@@ -132,9 +169,9 @@ def pi_command(config, script, *args):
     return ["python3", "-B", f'r3-control-kit/releases/{config["release"]}/{script}', *args]
 
 
-def read_only_check(config):
+def read_only_check(config, password=None):
     ssh(config, pi_command(config, "r3_live.py", "--check", "--port", "auto",
-                           "--uart-serial", config["uart_serial"]))
+                           "--uart-serial", config["uart_serial"]), password=password)
 
 
 def read_config(path=CONFIG):
@@ -147,30 +184,46 @@ def read_config(path=CONFIG):
 
 
 def setup():
-    old = read_config() if CONFIG.is_file() else {}
+    old = read_config(CONFIG) if CONFIG.is_file() else {}
 
     def ask(label, default=""):
         return input(f"{label}{f' [{default}]' if default else ''}: ").strip() or default
 
     config = {
         "host": ask("Pi login (username@hostname.local or username@IPv4)", old.get("host", "r3@r3-pi.local")),
-        "identity": ask("SSH private key", old.get("identity", str(KEY))).strip('"'),
+        "auth": ask("SSH login method (password/key)", old.get("auth", "key" if old else "password")).lower(),
+    }
+    if config["auth"] == "password":
+        # Carry forward the pin across network moves; it verifies the same physical Pi.
+        pin = ask("Pi host fingerprint (blank for first-contact prompt, '-' to reset)", old.get("host_fingerprint", ""))
+        config["host_fingerprint"] = "" if pin == "-" else pin
+    elif config["auth"] == "key":
+        config["identity"] = ask("SSH private key", old.get("identity", str(KEY))).strip('"')
+    else:
+        raise ValueError("Select password or key login.")
+    config.update({
         "bind_address": ask("PC IPv4 to bind SSH (blank for automatic, '-' to clear)", old.get("bind_address", "")),
         "yaw_sign": int(ask("Turn sign", str(old.get("yaw_sign", 1)))),
         "lateral_sign": int(ask("Strafe sign", str(old.get("lateral_sign", 1)))),
         "http_port": int(ask("Local web port", str(old.get("http_port", DEFAULT_PORT)))),
-    }
+    })
     if config["bind_address"] == "-":
         config["bind_address"] = ""
     validate(config, deployed=False)
+    password = None
+    if config["auth"] == "password":
+        ensure_password_client()
+        password = prompt_password()
     data = pi_payload()
     config["release"] = sha256(data).hexdigest()
-    print("For first contact, compare the SSH host fingerprint with the Pi's own screen before accepting it.")
-    ssh(config, ["python3", "--version"], trust=True)
-    ssh(config, ["python3", "-c", INSTALLER, config["release"]], data=data)
+    if config["auth"] == "key":
+        print("For first contact, compare the SSH host fingerprint with the Pi's own screen before accepting it.")
+        ssh(config, ["python3", "--version"], trust=True)
+    ssh(config, ["python3", "-c", INSTALLER, config["release"]], data=data,
+        password=password, trust=config["auth"] == "password")
     print("Keep Motor OFF. Power the board in Mec mode and connect its UART3 USB data cable.")
     input("Press Enter when ready for the read-only check. ")
-    ports = json.loads(ssh(config, pi_command(config, "r3_live.py", "--list-uarts"), capture=True))
+    ports = json.loads(ssh(config, pi_command(config, "r3_live.py", "--list-uarts"), capture=True, password=password))
     if not ports:
         raise ValueError("No matching UART3 USB adapter detected. Check the data cable and board power.")
     for i, port in enumerate(ports, 1):
@@ -182,7 +235,7 @@ def setup():
     if sum(port["serial"] == config["uart_serial"] for port in ports) != 1:
         raise ValueError("More than one adapter has that serial. Disconnect the duplicate and retry.")
     validate(config)
-    read_only_check(config)
+    read_only_check(config, password)
     temporary = CONFIG.with_suffix(".tmp")
     temporary.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     temporary.replace(CONFIG)
@@ -193,10 +246,14 @@ def start_args(config, *, simulation=False):
     args = [sys.executable, "-B", str(ROOT / "r3_ui.py"), "--http-port",
             str(DEFAULT_PORT if simulation else config["http_port"]), "--open-browser"]
     if not simulation:
-        args += ["--host", config["host"], "--identity-file", config["identity"],
+        args += ["--host", config["host"],
                  "--yaw-sign", str(config["yaw_sign"]), "--lateral-sign", str(config["lateral_sign"]),
                  "--remote-agent", pi_command(config, "r3_remote.py")[2],
                  "--uart-serial", config["uart_serial"]]
+        if config.get("auth") == "password":
+            args += ["--host-fingerprint", config["host_fingerprint"]]
+        else:
+            args += ["--identity-file", config["identity"]]
         if config.get("bind_address"):
             args += ["--bind-address", config["bind_address"]]
     return args
@@ -218,13 +275,14 @@ def main():
         else:
             config = validate(read_config())
             if args.action == "check":
-                read_only_check(config)
+                read_only_check(config, prompt_password() if config.get("auth") == "password" else None)
             else:
-                require_tool("ssh")
+                if config.get("auth") != "password":
+                    require_tool("ssh")
                 subprocess.run(start_args(config), check=True)
     except KeyboardInterrupt:
         return 0
-    except (ValueError, TypeError, OSError, EOFError, subprocess.CalledProcessError) as error:
+    except (ValueError, TypeError, OSError, EOFError, ImportError, subprocess.CalledProcessError) as error:
         print(f"R3 setup: {error}", file=sys.stderr)
         return 1
     return 0

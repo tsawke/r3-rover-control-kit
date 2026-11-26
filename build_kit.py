@@ -10,7 +10,7 @@ from control_kit import PI_FILES, ROOT, WHEEL, WHEEL_SHA256
 DIST = ROOT / "dist" / "R3-Control-Kit.zip"
 PREFIX = "R3-Control-Kit"
 FILES = (
-    *PI_FILES, "r3_ui.py", "control_kit.py", "README.md",
+    *PI_FILES, "r3_ui.py", "r3_ssh_password.py", "control_kit.py", "README.md",
     "Run-Kit.cmd", "Prepare-Key.cmd", "Setup-Pi.cmd", "Start-Control.cmd", "Check-Pi.cmd",
     "ui/index.html", "ui/app.js", "ui/style.css", "ui/icons.svg",
 )

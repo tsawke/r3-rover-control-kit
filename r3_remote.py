@@ -212,9 +212,7 @@ def agent(args):
         return 1
 
 
-def client_argv(args):
-    if args.simulate and not args.host:
-        return [sys.executable, "-u", str(Path(__file__).resolve()), "agent", "--simulate"]
+def remote_words(args):
     remote = ["python3", "-u", getattr(args, "remote_agent", DEFAULT_AGENT), "agent"]
     if args.simulate:
         remote.append("--simulate")
@@ -223,13 +221,19 @@ def client_argv(args):
                        "--yaw-sign", str(args.yaw_sign), "--lateral-sign", str(args.lateral_sign)])
         if getattr(args, "uart_serial", None):
             remote.extend(["--uart-serial", args.uart_serial])
+    return remote
+
+
+def client_argv(args):
+    if args.simulate and not args.host:
+        return [sys.executable, "-u", str(Path(__file__).resolve()), "agent", "--simulate"]
     ssh = ["ssh", "-T", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=2",
            "-o", "ServerAliveCountMax=2"]
     if args.identity_file:
         ssh.extend(["-o", "IdentitiesOnly=yes", "-i", str(args.identity_file.expanduser().resolve())])
     if args.bind_address:
         ssh.extend(["-b", str(args.bind_address)])
-    return [*ssh, args.host, shlex.join(remote)]
+    return [*ssh, args.host, shlex.join(remote_words(args))]
 
 
 def connect(args):

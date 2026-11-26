@@ -20,6 +20,7 @@ import webbrowser
 
 from r3_control import JOG_AXES, JOG_VERSION, MOVE_SPEED_RANGE_MM_S, SPEED_LIMITS_VERSION, TURN_SPEED_RANGE_DEG_S, jog_velocity
 from r3_remote import DEFAULT_AGENT, HEARTBEAT_PERIOD, KIT_AGENT_PATTERN, client_argv
+from r3_ssh_password import FINGERPRINT, bridge_args, paramiko_module, prompt_password
 
 
 UI = Path(__file__).with_name("ui")
@@ -63,7 +64,7 @@ def command_words(data):
 
 
 class Session:
-    def __init__(self, argv, owner, mode):
+    def __init__(self, argv, owner, mode, *, preamble=b""):
         self.owner, self.mode = owner, mode
         self.lock, self.done = Lock(), Event()
         self.wake_writer = Event()
@@ -86,7 +87,7 @@ class Session:
         self.errors.start()
         self.reader = Thread(target=self._read, daemon=True)
         self.reader.start()
-        Thread(target=self._write_and_watch, daemon=True).start()
+        Thread(target=self._write_and_watch, args=(preamble,), daemon=True).start()
 
     def touch(self):
         with self.lock:
@@ -202,9 +203,11 @@ class Session:
             self.done.set()
             self.wake_writer.set()
 
-    def _write_and_watch(self):
+    def _write_and_watch(self, preamble):
         try:
             with self.child.stdin as pipe:
+                if preamble and pipe.write(preamble) != len(preamble):
+                    raise OSError("Incomplete local SSH input.")
                 while not self.done.is_set() and self.child.poll() is None:
                     self.wake_writer.clear()
                     with self.lock:
@@ -252,8 +255,9 @@ class Session:
 
 
 class Console:
-    def __init__(self, live_argv=None):
+    def __init__(self, live_argv=None, *, live_preamble=b""):
         self.live_argv = live_argv
+        self.live_preamble = live_preamble
         self.token = secrets.token_hex(24)
         self.lock = Lock()
         self.session = None
@@ -276,7 +280,7 @@ class Console:
                     argv = client_argv(SimpleNamespace(simulate=True, host=None))
                 else:
                     raise ValueError("Physical setup has not been confirmed.")
-                self.session = s = Session(argv, owner, mode)
+                self.session = s = Session(argv, owner, mode, preamble=self.live_preamble if mode == "live" else b"")
             if not s or s.owner != owner:
                 raise ValueError("This tab does not own the controller.")
             if action == "stop":
@@ -350,7 +354,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--http-port", type=int, default=8765)
     parser.add_argument("--host", help="Trusted Pi SSH destination")
-    parser.add_argument("--identity-file", type=Path)
+    auth = parser.add_mutually_exclusive_group()
+    auth.add_argument("--identity-file", type=Path)
+    auth.add_argument("--host-fingerprint", help="Use password authentication and verify this SHA-256 host fingerprint")
     parser.add_argument("--bind-address", type=ipaddress.ip_address)
     parser.add_argument("--yaw-sign", type=int, choices=(-1, 1))
     parser.add_argument("--lateral-sign", type=int, choices=(-1, 1))
@@ -359,20 +365,32 @@ def main():
     parser.add_argument("--open-browser", action="store_true")
     args = parser.parse_args()
     live = None
+    preamble = b""
     if args.host:
         if (not re.fullmatch(r"[\w.][\w.-]*@[A-Za-z0-9][A-Za-z0-9.:-]*", args.host)
-                or not args.identity_file or not args.identity_file.expanduser().is_file()
                 or args.yaw_sign is None or args.lateral_sign is None):
-            parser.error("Live mode requires a trusted host, key and verified sign options.")
+            parser.error("Live mode requires a valid Pi host and verified sign options.")
         if args.remote_agent != DEFAULT_AGENT and not re.fullmatch(KIT_AGENT_PATTERN, args.remote_agent):
             parser.error("Invalid Pi agent path.")
         if args.uart_serial is not None and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,80}", args.uart_serial):
             parser.error("Invalid UART3 serial number.")
         args.simulate, args.port = False, "auto"
-        live = client_argv(args)
-        live[1:1] = ["-F", "none", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"]
+        if args.host_fingerprint:
+            if not re.fullmatch(FINGERPRINT, args.host_fingerprint):
+                parser.error("Enter the Pi's SSH host fingerprint in SHA256 format.")
+            try:
+                paramiko_module()
+                preamble = json.dumps(prompt_password(), ensure_ascii=False).encode("utf-8") + b"\n"
+            except (ImportError, ValueError) as error:
+                parser.error(f"{error} Run Setup-Pi.cmd first.")
+            live = bridge_args(args)
+        else:
+            if not args.identity_file or not args.identity_file.expanduser().is_file():
+                parser.error("Live mode requires a local SSH key or a verified host fingerprint for password login.")
+            live = client_argv(args)
+            live[1:1] = ["-F", "none", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"]
     with ThreadingHTTPServer(("127.0.0.1", args.http_port), Handler) as server:
-        server.console = Console(live)
+        server.console = Console(live, live_preamble=preamble)
         server.host_header = f"127.0.0.1:{server.server_port}"
         print(f"R3 console: http://{server.host_header}/", flush=True)
         if args.open_browser:

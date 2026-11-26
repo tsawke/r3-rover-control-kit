@@ -53,8 +53,15 @@ let held = null, endingJog = false, gesture = 0;
 
 function translated(message) {
   if (!message) return "";
-  if (message.startsWith("ssh: connect to host") || message.startsWith("ssh: Could not resolve hostname")) {
+  if (message.startsWith("ssh: connect to host") || message.startsWith("ssh: Could not resolve hostname")
+      || message.startsWith("SSH connection failed:")) {
     return t("Could not reach the Pi. Check its power and network, then reconnect.", "无法连接 Pi 3。请检查 Pi 供电和网络，然后重试。");
+  }
+  if (message.startsWith("Pi rejected the username or password.")) {
+    return t("The Pi rejected the login. Restart the launcher to enter the password again.", "Pi 拒绝了登录。请重开启动脚本并重新输入密码。");
+  }
+  if (message.startsWith("The Pi does not allow SSH password login.")) {
+    return t(message, "Pi 未允许 SSH 密码登录。请在 Pi 上启用，或改用密钥登录。");
   }
   if (message === "Request failed.") return t(message, "请求失败。");
   if (message === "Local control service unavailable. Cut main power if live control is lost.") {

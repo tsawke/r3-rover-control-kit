@@ -6,13 +6,13 @@ Download `R3-Control-Kit.zip` from the [latest release](https://github.com/tsawk
 
 ## Quick start
 
-1. Extract the entire ZIP to a writable folder. Install [Python 3.10 or newer](https://www.python.org/downloads/windows/) and the [Windows OpenSSH Client](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse). Use a current Chrome or Edge browser. No Python packages need to be installed on Windows.
-2. Double-click **Prepare-Key.cmd** to generate this computer's dedicated Secure Shell (SSH) key pair. Import or install only the printed `.pub` file on the Pi. The private key stays on this computer. You can instead use an existing authorized key by entering its path during setup.
+1. Extract the entire ZIP to a writable folder. Install [Python 3.10 or newer](https://www.python.org/downloads/windows/) and use a current Chrome or Edge browser. The optional key-login mode also uses the [Windows OpenSSH Client](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse).
+2. Choose how to sign in to the Pi. **Password** (default for a new setup) uses the Pi account's existing username and password, including an administrator account; no client key registration is required. To use **key** instead, run **Prepare-Key.cmd** and add only the printed `.pub` file to the Pi, or use an existing authorized key.
 3. Join the Pi and Windows computer to the same network as described below. Use a 2.4 GHz Wi-Fi network or wired Ethernet; the network must allow devices to reach one another.
-4. With the board in `Mec`, **Motor OFF**, and the USB data cable in C30D **UART3**, double-click **Setup-Pi.cmd**. Enter the Pi login, such as `r3@r3-pi.local`, or a login with its current IPv4 address. Compare the SSH host fingerprint before accepting it. Select the UART3 adapter from the list. The script uploads the agent, verifies the files, reads the board without sending commands, and saves the connection profile in `control.local.json`.
-5. Double-click **Start-Control.cmd**. It starts the server on `127.0.0.1:8770` and opens the browser. Keep the launcher window open. Both **Simulation** and **Live** are available. Use **Stop** before closing the launcher or changing the Pi configuration.
+4. With the board in `Mec`, **Motor OFF**, and the USB data cable in C30D **UART3**, double-click **Setup-Pi.cmd**. Enter the Pi login, such as `r3@r3-pi.local`, or a login with its current IPv4 address. Select `password` or `key`. In password mode, type the password and confirm the Pi host fingerprint on first contact (or enter the verified fingerprint up front). Select the UART3 adapter from the list. The script uploads the agent, verifies the files, reads the board without sending commands, and saves the connection profile in `control.local.json`.
+5. Double-click **Start-Control.cmd**. If using password mode, type the Pi password in the launcher window once per launch. It starts the server on `127.0.0.1:8770` and opens the browser. Keep the launcher window open. Both **Simulation** and **Live** are available. Use **Stop** before closing the launcher or changing the Pi configuration.
 
-The bundle contains the client, Pi agent, pySerial 3.5 and its license. After the prerequisites are installed, normal setup and use do not need internet access. The launcher serves localhost only. Do not send your local profile or private key with the ZIP.
+The bundle contains the client, Pi agent, pySerial 3.5 and its license. Password mode automatically installs [Paramiko](https://pypi.org/project/paramiko/) on Windows in the kit directory on first setup, so allow internet access for that step. Normal operation uses the local network. The password is not saved in the profile or sent to the browser; the launcher serves localhost only.
 
 ## Join or change networks
 
@@ -28,21 +28,28 @@ hostname -I
 
 Enter the Wi-Fi password at the Pi prompt. Connect Windows to the same network. If `<hostname>.local` does not resolve on Windows, use the Pi's IPv4 address from `hostname -I` or the router's device list. If multiple addresses appear, use the one on the shared network. See the [Raspberry Pi networking guide](https://www.raspberrypi.com/documentation/computers/configuration.html#wireless-connection).
 
-Enable SSH on the Pi with `sudo systemctl enable --now ssh` if it is not already enabled. In the intended login's home directory, add the Windows-generated public-key line to `~/.ssh/authorized_keys`; preserve existing entries:
+Enable Secure Shell (SSH) on the Pi with `sudo systemctl enable --now ssh` if it is not already enabled. For **password login** on a Pi previously set up for keys only, use the local Pi terminal or an existing administrator session. Set `PasswordAuthentication yes` in an appropriate SSH server configuration drop-in (for example, `sudoedit /etc/ssh/sshd_config.d/00-r3-password.conf`). Preserve the existing key settings. Validate with `sudo sshd -t`, check `sudo sshd -T | grep '^passwordauthentication'` reports `yes`, and run `sudo systemctl reload ssh`. If it still reports `no`, review the existing drop-ins and account-specific rules. Keep an existing session open until a separate login works. Do not forward the SSH port to the internet.
+
+From the Pi's local terminal, get its fingerprint for **Setup-Pi.cmd**:
+
+```sh
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+For **key login**, add the Windows-generated public-key line to `~/.ssh/authorized_keys` in the intended login's home directory and preserve existing entries:
 
 ```sh
 mkdir -p ~/.ssh
 chmod 700 ~/.ssh
 nano ~/.ssh/authorized_keys
 chmod 600 ~/.ssh/authorized_keys
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 ```
 
-The last command prints the host fingerprint to compare on Windows. Check `id -nG` for the Pi login. If it lacks the `dialout` group and the serial port is denied, an administrator can run `sudo usermod -aG dialout LOGIN_NAME`, replacing `LOGIN_NAME` with the actual user, then sign out and back in.
+For either login method, check `id -nG` for the Pi login. If it lacks the `dialout` group and the serial port is denied, an administrator can run `sudo usermod -aG dialout LOGIN_NAME`, replacing `LOGIN_NAME` with the actual user, then sign out and back in.
 
 ### New card: provision from Raspberry Pi Imager
 
-Use [Raspberry Pi Imager](https://www.raspberrypi.com/documentation/computers/imager.html), select Raspberry Pi 3 and Raspberry Pi OS Lite (32-bit), and choose the correct card. In customisation, set a hostname (for example `r3-pi`), create your own administrator (for example `r3`), enter the target Wi-Fi and country, and enable SSH with public-key authentication. Import the `.pub` from **Prepare-Key.cmd**. Writing an image erases the selected card; back up an existing card before replacing its contents. Boot the Pi and continue at step 4.
+Use [Raspberry Pi Imager](https://www.raspberrypi.com/documentation/computers/imager.html), select Raspberry Pi 3 and Raspberry Pi OS Lite (32-bit), and choose the correct card. In customisation, set a hostname (for example `r3-pi`), create an administrator (for example `r3`), enter the target Wi-Fi and country, and enable SSH. Select **Use password authentication** for account login, or **Use public key authentication** and import the `.pub` from **Prepare-Key.cmd**. Writing an image erases the selected card; back up an existing card before replacing its contents. Boot the Pi and continue at step 4.
 
 ### Move an already configured robot
 
@@ -76,7 +83,7 @@ For the first **Live** test, support the chassis securely with all wheels clear.
 | Symptom | Action |
 | --- | --- |
 | Cannot reach the Pi | Check its power and IP address. Use wired Ethernet or a network that allows local device-to-device traffic. Keep the console on the same network. |
-| SSH rejects the key | Check the login and the public key in that login's `authorized_keys`. For a changed host key, verify the new fingerprint on the Pi before updating the Windows trust record. |
+| SSH rejects login | In password mode, check the Pi username, password, and whether the Pi accepts password authentication. In key mode, check the public key in that login's `authorized_keys`. Verify a changed host fingerprint on the Pi before rerunning setup. |
 | No UART3 adapter or no valid feedback | Use a USB data cable, the middle UART3 port, board power, and `Mec`. Check `dialout` permissions and stop any other serial controller before retrying. |
 | Want to check the board without motion | Keep Motor OFF and run **Check-Pi.cmd**. A valid check prints voltage, stop flag, stationarity and `0 command frames sent`. |
 | Startup port is busy | Use the original console tab or close the old launcher. To change port, run **Setup-Pi.cmd** again and enter another local port. |
