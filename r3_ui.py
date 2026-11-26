@@ -333,6 +333,14 @@ class Handler(BaseHTTPRequestHandler):
         if (self.headers.get("Host") != self.server.host_header
                 or self.headers.get("Origin") != "http://" + self.server.host_header
                 or not token.isascii() or not secrets.compare_digest(token, self.server.console.token)):
+            # Close with the small request body consumed so Windows can deliver the 403.
+            self.connection.settimeout(0.25)
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if 0 < length <= MAX_REQUEST:
+                    self.rfile.read(length)
+            except (OSError, ValueError):
+                pass
             return self._json(HTTPStatus.FORBIDDEN, {"error": "Local console only."})
         action = self.path.removeprefix("/api/")
         if not self.path.startswith("/api/") or action not in ("status", "connect", "command", "jog", "stop"):
