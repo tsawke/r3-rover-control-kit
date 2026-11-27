@@ -2,7 +2,7 @@
 
 A bilingual browser console for a WheelTec R3 Mecanum robot: manual drive, absolute X/Y moves, and preset or custom turns. The console starts in English and remembers the language selected with the **中文 / EN** button. Windows runs the local console; a Raspberry Pi 3 on the same network runs the motor-control agent.
 
-Download `R3-Control-Kit.zip` from the [latest release](https://github.com/tsawke/r3-rover-control-kit/releases/latest). Access to this private project must be granted by the repository owner.
+Download `R3-Control-Kit.zip` from the [latest release](https://github.com/tsawke/r3-rover-control-kit/releases/latest). For a robot you are taking over, obtain its connection details and authorized Pi login from the owner. The download includes a local simulator; live control connects to the robot over your local network.
 
 ## Quick start
 
@@ -12,7 +12,7 @@ Download `R3-Control-Kit.zip` from the [latest release](https://github.com/tsawk
 4. With the board in `Mec`, **Motor OFF**, and the USB data cable in C30D **UART3**, double-click **Setup-Pi.cmd**. Enter the Pi login, such as `r3@r3-pi.local`, or a login with its current IPv4 address. Select `password` or `key`. In password mode, type the password and confirm the Pi host fingerprint on first contact (or enter the verified fingerprint up front). Select the UART3 adapter from the list. The script uploads the agent, verifies the files, reads the board without sending commands, and saves the connection profile in `control.local.json`.
 5. Double-click **Start-Control.cmd**. If using password mode, type the Pi password in the launcher window once per launch. It starts the server on `127.0.0.1:8770` and opens the browser. Keep the launcher window open. Both **Simulation** and **Live** are available. Use **Stop** before closing the launcher or changing the Pi configuration.
 
-The bundle contains the client, Pi agent, pySerial 3.5 and its license. Password mode automatically installs [Paramiko](https://pypi.org/project/paramiko/) on Windows in the kit directory on first setup, so allow internet access for that step. Normal operation uses the local network. The password is not saved in the profile or sent to the browser; the launcher serves localhost only.
+The bundle contains the client, Pi agent, and pySerial 3.5. Password mode automatically installs [Paramiko](https://pypi.org/project/paramiko/) on Windows in the kit directory on first setup, so allow internet access for that step. Normal operation uses the local network. The password stays in the local launcher and the encrypted SSH session; the profile stores connection settings, and the browser talks only to localhost.
 
 ## Join or change networks
 
@@ -28,7 +28,15 @@ hostname -I
 
 Enter the Wi-Fi password at the Pi prompt. Connect Windows to the same network. If `<hostname>.local` does not resolve on Windows, use the Pi's IPv4 address from `hostname -I` or the router's device list. If multiple addresses appear, use the one on the shared network. See the [Raspberry Pi networking guide](https://www.raspberrypi.com/documentation/computers/configuration.html#wireless-connection).
 
-Enable Secure Shell (SSH) on the Pi with `sudo systemctl enable --now ssh` if it is not already enabled. For **password login** on a Pi previously set up for keys only, use the local Pi terminal or an existing administrator session. Set `PasswordAuthentication yes` in an appropriate SSH server configuration drop-in (for example, `sudoedit /etc/ssh/sshd_config.d/00-r3-password.conf`). Preserve the existing key settings. Validate with `sudo sshd -t`, check `sudo sshd -T | grep '^passwordauthentication'` reports `yes`, and run `sudo systemctl reload ssh`. If it still reports `no`, review the existing drop-ins and account-specific rules. Keep an existing session open until a separate login works. Do not forward the SSH port to the internet.
+Enable Secure Shell (SSH) on the Pi with `sudo systemctl enable --now ssh` if it is not already enabled. A recipient of the reference robot can skip the SSH server change when the owner has already enabled and verified password login. On a different Pi previously set up for keys only, use the local terminal or an existing administrator session. Add an SSH server drop-in, for example `sudoedit /etc/ssh/sshd_config.d/60-r3-control-password.conf`, with the following account-specific setting. Replace `YOUR_PI_USER` with the actual login name.
+
+```text
+Match User YOUR_PI_USER
+    PasswordAuthentication yes
+Match all
+```
+
+Validate with `sudo sshd -t` and reload with `sudo systemctl reload ssh`. Keep the current administrator session open while you test a separate password login. Use an account with serial access and keep SSH on the local network.
 
 From the Pi's local terminal, get its fingerprint for **Setup-Pi.cmd**:
 
@@ -62,13 +70,30 @@ After changing networks, rerun **Setup-Pi.cmd** with the current host or IPv4 ad
 | Chassis | WheelTec R3, four 75 mm Mecanum wheels, no suspension, four independent motor channels |
 | Motor and encoder | Four MG513P30_12V geared DC motors; 500-line giant magnetoresistive (GMR) encoder configuration |
 | Motor controller | WheelTec C30D V2.3, STM32F407VET6, vendor C30D 2.x GMR release dated 2026-09-21; display mode `Mec` |
-| Power and data | 12 V nominal battery for C30D; separate 5 V Micro-USB supply for Pi 3. Pi USB-A to middle C30D USB-C UART3 data port, 115200 baud. UART1 is not the control port. Never connect 12 V to the Pi. |
-| Installed Pi | Raspberry Pi 3, Raspberry Pi OS Lite (32-bit), image dated 2026-10-06, hostname `r3-pi`, administrator `r3lab`; configured for SSH public-key authentication |
+| Power | 12 V nominal battery for C30D; separate regulated 5 V Micro-USB supply for the Pi. Never connect 12 V to the Pi. |
+| Data | Pi USB-A to the middle C30D USB-C port marked `UART3`, 115200 baud, 8 data bits, no parity, 1 stop bit, no flow control. UART1 is for programming, not driving. The setup script identifies a compatible USB serial adapter and verifies the selected board by reading its telemetry. |
+| Installed Pi | Raspberry Pi 3 Model B Rev 1.2, Raspberry Pi OS Lite (32-bit), Raspbian GNU/Linux 13 (Trixie), image dated 2026-10-06; ARMv7 userspace reports `armv7l`; Python 3.13.5. The Pi account needs permission to open the serial port. |
 | Command frame | At connection, origin `(0, 0)`; initial forward along `+X`, left along `+Y`; counterclockwise angles positive. Verified configuration uses turn sign `1` and strafe sign `1`. |
 | Limits | Planar limit 55–100 mm/s; rotation limit 8–13.18°/s; default turn +10°; input range −360° to +360°; up to 3 m per coordinate move, up to 60 s per command. |
 | Position and stop | Position window 0.02 m; live angle window 1.25°. These are controller tolerances, not measured ground accuracy. Voltage gate: 11.0 V to start, 10.55 V minimum while running, 13.0 V maximum. Manual hold expires after 0.45 s without renewal on the Pi; the Pi link watchdog expires after 0.80 s. |
 
-Existing operator credentials for the reference Pi are kept in a separate private handover README. Recipients who only need the software should create their own login and key.
+The reference Pi supports password and public-key login. Its actual connection details and credentials are provided separately to authorized operators. For a new robot, use a Pi account you control and run setup to record that robot's adapter and motion signs.
+
+## How control works
+
+```text
+Windows browser -> local Python console -> SSH over the LAN -> Pi motion agent
+Pi motion agent -> USB serial / UART3 -> C30D motor controller -> four wheels
+C30D velocity and status telemetry -> Pi odometry -> browser position estimate
+```
+
+The browser sends structured requests to the Python service on `127.0.0.1`. Simulation runs on the Windows computer without a Pi. In Live mode, the console starts one SSH session with the Pi agent. The setup script installs the agent into a checksum-named release directory in the Pi user's home folder. It leaves the operating system and C30D firmware in place.
+
+The Pi sends desired body-frame velocity: forward speed, sideways speed, and yaw rate. The C30D's vendor firmware maps these requests to the four wheels and closes the wheel-speed loops. The Pi decodes the standard 24-byte feedback frames and integrates the reported body velocity into a fixed ground-frame pose. The map shows this encoder-based estimate. Wheel slip and floor conditions can change real position without a corresponding change in the estimate.
+
+For a coordinate move, the Pi computes the remaining ground-frame displacement and transforms it into the robot's current body frame. It limits speed and attempts to hold the starting heading. A turn tracks the requested relative angle, slows before the target, and waits for a quiet reading before declaring success. While a jog button is held, the chosen direction runs relative to the current robot heading. A second command cannot take over a moving session.
+
+The Pi checks feedback freshness, voltage and the stop flag before motion. During motion it also checks that new telemetry arrives and that the wheels report movement. Loss of feedback, loss of the desktop heartbeat, or a stop request ends the motion session and attempts to send zero velocity. In manual mode the browser must renew the hold; releasing the button, leaving it, or losing focus ends the hold. If the Pi loses power or the USB cable is interrupted, the software may be unable to send the final stop frame. The black C30D main power switch remains the physical cutoff.
 
 ## Operate the console
 
@@ -102,4 +127,4 @@ python -B -m unittest discover
 python -B build_kit.py
 ```
 
-The build downloads the pinned pySerial wheel and its license. It writes `dist/R3-Control-Kit.zip` and prints the archive's SHA-256 checksum. The build uses an explicit list of files; private credentials, local configuration, logs, and firmware are not distribution inputs.
+The build downloads the pinned pySerial wheel and its license. It writes `dist/R3-Control-Kit.zip` and prints the archive's SHA-256 checksum. The build uses an explicit list of files; private credentials, local configuration, logs, and firmware are not distribution inputs. Icon notices are in [THIRD-PARTY-LUCIDE.txt](THIRD-PARTY-LUCIDE.txt).
