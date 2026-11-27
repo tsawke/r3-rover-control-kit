@@ -66,7 +66,7 @@ class PasswordTransportTests(unittest.TestCase):
                             channel.sendall(data[::-1])
                             channel.sendall_stderr(b"fixture stderr\n")
                             channel.send_exit_status(0)
-                except (ConnectionResetError, EOFError) as error:
+                except (ConnectionError, EOFError) as error:
                     if not expect_refusal or "login" in seen:
                         errors.append(error)
                 except Exception as error:
